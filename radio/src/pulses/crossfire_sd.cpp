@@ -671,6 +671,11 @@ const char* crsfSdRunSession(uint8_t module, const CrsfSdUi& ui, bool& ok)
   return result;
 }
 
+__attribute__((weak)) void crsfSdNotify(const char* title, const char* text)
+{
+  POPUP_WARNING(title, text);
+}
+
 // Fallback for UI flavors without a session screen: no progress, EXIT cancels
 __attribute__((weak)) void crsfSdRunWithUi(uint8_t module, uint8_t kind)
 {
@@ -695,7 +700,7 @@ void crsfSdCheck()
 
     case SD_REJECTED:
       _state = SD_IDLE;
-      POPUP_WARNING("Module refused", _rejectText);
+      crsfSdNotify("Module refused", _rejectText);
       break;
 
     case SD_ACCEPTED:

@@ -69,6 +69,8 @@ struct CrsfSdUi {
 
 // implemented by each UI flavor; called from crsfSdCheck()
 void crsfSdRunWithUi(uint8_t module, uint8_t kind);
+// a notice that must not block the UI task (color radios' POPUP_WARNING is modal)
+void crsfSdNotify(const char* title, const char* text);
 
 // the session itself; returns the END message (or an error) for a result popup
 const char* crsfSdRunSession(uint8_t module, const CrsfSdUi& ui, bool& ok);

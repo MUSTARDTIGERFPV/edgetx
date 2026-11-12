@@ -68,6 +68,11 @@ class CrsfSdDialog : public FullScreenDialog
   static LAYOUT_VAL_SCALED(PROGRESS_W, 200)
 };
 
+void crsfSdNotify(const char* title, const char* text)
+{
+  new MessageDialog(title, text);
+}
+
 void crsfSdRunWithUi(uint8_t module, uint8_t kind)
 {
   const char* title = kind == CRSF_SD_KIND_RX_UPDATE    ? "Update receiver"
