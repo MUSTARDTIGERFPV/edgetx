@@ -410,7 +410,12 @@ void menuRadioSdManager(event_t _event)
 #endif
 #if defined(PCBTARANIS)
           if (!strcasecmp(ext, FIRMWARE_EXT)) {
-            if (isBootloader(lfn)) {
+#if !defined(RADIO_TANGO2)
+            if (isBootloader(lfn))
+#else
+            if (false)
+#endif
+            {
               POPUP_MENU_ADD_ITEM(STR_FLASH_BOOTLOADER);
             }
           }

@@ -37,6 +37,9 @@
 
 #if defined(CROSSFIRE)
   #include "telemetry/crossfire.h"
+#if defined(RADIO_TANGO2)
+#include "targets/tango2/radio_host.h"
+#endif
 #endif
 
 uint8_t g_moduleIdx;
@@ -341,6 +344,11 @@ static uint8_t VIEWOPT_ROW(uint8_t value) { return expandState.viewOpt ? value :
 
 inline uint8_t MODULE_TYPE_ROWS(int moduleIdx)
 {
+#if defined(RADIO_TANGO2)
+  // internal RF image: ELRS or TBS Crossfire (targets/tango2/radio_host.h)
+  if (moduleIdx == INTERNAL_MODULE && isModuleCrossfire(INTERNAL_MODULE))
+    return 1;
+#endif
   if (isModuleXJT(moduleIdx) || isModuleISRM(moduleIdx) ||
       isModuleR9MNonAccess(moduleIdx) || isModuleDSM2(moduleIdx) ||
       isModuleSBUS(moduleIdx) || isModulePPM(moduleIdx))
@@ -1475,11 +1483,20 @@ void menuModelSetup(event_t event)
           lcdDrawTextAtIndex(lcdNextPos + 3, y, STR_R9M_REGION,
                              g_model.moduleData[moduleIdx].subType,
                              (menuHorizontalPosition == 1 ? attr : 0));
+#if defined(RADIO_TANGO2)
+        else if (moduleIdx == INTERNAL_MODULE &&
+                 isModuleCrossfire(INTERNAL_MODULE))
+          lcdDrawText(lcdNextPos + 3, y,
+                      g_model.moduleData[moduleIdx].subType == TANGO2_RF_CROSSFIRE
+                          ? "XFire" : "ELRS",
+                      menuHorizontalPosition == 1 ? attr : 0);
+#else
         else if (moduleIdx == INTERNAL_MODULE &&
                  isModuleCrossfire(INTERNAL_MODULE))
           lcdDrawTextAtIndex(
               lcdNextPos + 3, y, STR_CRSF_BAUDRATE,
               CROSSFIRE_STORE_TO_INDEX(g_eeGeneral.internalModuleBaudrate), 0);
+#endif
 
 #if defined(HARDWARE_EXTERNAL_MODULE)
         if (attr && menuHorizontalPosition == 0 &&
@@ -1522,6 +1539,17 @@ void menuModelSetup(event_t event)
                 break;
 
               case 1:
+#if defined(RADIO_TANGO2)
+                if (moduleIdx == INTERNAL_MODULE &&
+                    isModuleCrossfire(INTERNAL_MODULE)) {
+                  // the rfhost task switches images when this changes;
+                  // channels stay as they are
+                  CHECK_INCDEC_MODELVAR(event,
+                                        g_model.moduleData[moduleIdx].subType,
+                                        TANGO2_RF_ELRS, TANGO2_RF_LAST);
+                  break;
+                }
+#endif
                 if (isModuleXJT(moduleIdx)) {
                   g_model.moduleData[moduleIdx].subType =
                       checkIncDec(event, g_model.moduleData[moduleIdx].subType,

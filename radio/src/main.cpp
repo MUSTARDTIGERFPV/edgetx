@@ -574,7 +574,13 @@ void perMain()
 
   checkSpeakerVolume();
 
+#if defined(RADIO_TANGO2)
+  // USB is serial (CLI) here almost all the time; only mass storage hands
+  // the SD card to the PC
+  if (!usbPlugged() || (getSelectedUsbMode() != USB_MASS_STORAGE_MODE)) {
+#else
   if (!usbPlugged() || (getSelectedUsbMode() == USB_UNSELECTED_MODE)) {
+#endif
     checkStorageUpdate();
     initLoggingTimer();  // initialize software timer for logging
   }

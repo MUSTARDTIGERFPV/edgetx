@@ -107,7 +107,12 @@ void postRadioSettingsLoad()
 #if defined(USB_SERIAL)
   // default VCP to CLI if not configured
   // to something else as NONE.
+#if defined(RADIO_TANGO2)
+  // the PC reboots this radio into its loader through the CLI
+  if (serialGetMode(SP_VCP) == UART_MODE_NONE) {
+#else
   if (isInternalModuleCrossfire() && serialGetMode(SP_VCP) == UART_MODE_NONE) {
+#endif
     serialSetMode(SP_VCP, UART_MODE_CLI);
   }
 #endif

@@ -413,6 +413,16 @@ void generalDefault()
   setDefaultOwnerId();
 #endif
 
+#if defined(RADIO_TANGO2)
+  // USB comes up as serial with the CLI on it, so the PC can always send
+  // "loader" (reboot into the resident loader) without menu interaction
+  g_eeGeneral.USBMode = USB_SERIAL_MODE;
+  serialSetMode(SP_VCP, UART_MODE_CLI);
+  // VBAT (internal ADC channel) reads ~1.8 V on the bench unit; no coin
+  // cell confirmed, so don't nag at every boot
+  g_eeGeneral.disableRtcWarning = 1;
+#endif
+
 #if defined(RADIOMASTER_RTF_RELEASE)
   // Those settings are for headless radio
   g_eeGeneral.USBMode = USB_JOYSTICK_MODE;
@@ -1500,6 +1510,9 @@ void runStartupAnimation()
   bool isPowerOn = false;
 
   while (pwrDelayHoldActive()) {
+#if defined(RADIO_TANGO2)
+    WDG_RESET();  // the resident loader started the IWDG (~4 s) before us
+#endif
     duration = get_tmr10ms() - start;
     if (duration < PWR_PRESS_DURATION_MIN()) {
       drawStartupAnimation(duration, PWR_PRESS_DURATION_MIN());
@@ -1624,7 +1637,14 @@ void edgeTxInit()
   BACKLIGHT_ENABLE(); // we start the backlight during the startup animation
 
 #if defined(STARTUP_ANIMATION)
+#if defined(RADIO_TANGO2)
+  // The resident loader clears the reset flags before starting EdgeTX, so a
+  // software reset (e.g. after the PC flashed EdgeTX) looks like power-on.
+  // With USB present the MCU is powered anyway: skip the power-button hold.
+  if (WAS_RESET_BY_WATCHDOG_OR_SOFTWARE() || usbPlugged()) {
+#else
   if (WAS_RESET_BY_WATCHDOG_OR_SOFTWARE()) {
+#endif
     pwrOn();
   }
   else {
@@ -1760,6 +1780,13 @@ void edgeTxInit()
 
 #if defined(FUNCTION_SWITCHES)
     setFSStartupPosition();
+#endif
+
+#if defined(RADIO_TANGO2)
+    // Bring USB (CLI) up before the boot alerts, which block perMain(), so
+    // the PC can always send "loader" while a warning is on screen
+    extern void handleUsbConnection();
+    handleUsbConnection();
 #endif
 
 #if defined(GUI)

@@ -9,7 +9,12 @@ option(USB_SERIAL "Enable USB serial (CDC)" OFF)
 set(ARCH ARM)
 add_definitions(-DSTM32 -DLUA_INPUTS -DVARIO)
 
-set(LINKER_DIR ${RADIO_SRC_DIR}/boards/generic_stm32/linker)
+if(TARGET_LINKER_ROOT)
+  # target ships its own complete set of linker scripts
+  set(LINKER_DIR ${TARGET_LINKER_ROOT})
+else()
+  set(LINKER_DIR ${RADIO_SRC_DIR}/boards/generic_stm32/linker)
+endif()
 add_link_options(-L${LINKER_DIR} -L${LINKER_DIR}/${TARGET_LINKER_DIR})
 
 set(STM32_DRIVER_DIR targets/common/arm/stm32)

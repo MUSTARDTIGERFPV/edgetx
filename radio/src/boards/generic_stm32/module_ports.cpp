@@ -32,6 +32,9 @@
 #include "intmodule_heartbeat.h"
 
 #include "board.h"
+#if defined(RADIO_TANGO2)
+#include "targets/tango2/radio_host.h"
+#endif
 #include "dataconstants.h"
 
 #include "pulses/pulses.h"
@@ -39,7 +42,7 @@
 
 #include "trainer.h"
 
-#if defined (HARDWARE_INTERNAL_MODULE)
+#if defined (HARDWARE_INTERNAL_MODULE) && !defined(RADIO_TANGO2)
 #if defined(INTMODULE_USART)
 
 #define INTMODULE_USART_IRQ_PRIORITY 5
@@ -374,7 +377,11 @@ static const stm32_softserial_rx_port sportSoftRX = {
   .EXTI_Port = TELEMETRY_EXTI_PORT,
   .EXTI_SysLine = TELEMETRY_EXTI_SYS_LINE,
   .EXTI_Line = TELEMETRY_EXTI_LINE,
+#if defined(TELEMETRY_DIR_GPIO)
   .dir_GPIO = TELEMETRY_DIR_GPIO,
+#else
+  .dir_GPIO = GPIO_UNDEF,
+#endif
   .dir_Input = TELEMETRY_SET_INPUT,
   // re-use S.PORT serial RX buffer
   .buffer = { SportModule_RXBuffer, TELEMETRY_FIFO_SIZE },
@@ -414,7 +421,16 @@ static void _internal_module_set_bootcmd(uint8_t enable)
 #endif
 
 static const etx_module_port_t _internal_ports[] = {
-#if defined(INTMODULE_USART)
+#if defined(RADIO_TANGO2)
+  // the ELRS or Crossfire image behind a virtual port (targets/tango2/radio_host.cpp)
+  {
+    .port = ETX_MOD_PORT_UART,
+    .type = ETX_MOD_TYPE_SERIAL,
+    .dir_flags = ETX_MOD_DIR_TX_RX | ETX_MOD_FULL_DUPLEX,
+    .drv = { .serial = &radioVirtualSerialDriver },
+    .hw_def = nullptr,
+  },
+#elif defined(INTMODULE_USART)
   {
     .port = ETX_MOD_PORT_UART,
     .type = ETX_MOD_TYPE_SERIAL,

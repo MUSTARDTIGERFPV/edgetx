@@ -1284,6 +1284,197 @@ int cliReboot(const char ** argv)
   return 0;
 }
 
+#if defined(RADIO_TANGO2)
+#include "targets/tango2/mlx90393_gimbal.h"
+
+#include "targets/tango2/elrs_host.h"
+#include "targets/tango2/crossfire_host.h"
+#include "targets/tango2/radio_host.h"
+
+// Internal RF image state and the recent host/image log lines.
+// `rf elrs` / `rf xf` select the image for the current model (as the
+// Model Setup internal RF field does); the rfhost task then switches.
+int cliRf(const char ** argv)
+{
+  if (argv[1] && !strcmp(argv[1], "send")) {
+    // rf send <dest> <type> [payload bytes...], hex; origin 0xEA is added
+    // for extended types (>= 0x28), sync and crc (poly 0xD5) always
+    uint8_t f[64];
+    int n = 2;
+    int type = argv[3] ? strtol(argv[3], nullptr, 16) : -1;
+    if (!argv[2] || type < 0) {
+      cliSerialPrint("usage: rf send <dest> <type> [bytes...]");
+      return -1;
+    }
+    f[0] = 0xEE;
+    f[n++] = type;
+    if (type >= 0x28) {
+      f[n++] = strtol(argv[2], nullptr, 16);
+      f[n++] = 0xEA;
+    }
+    // each argument is one hex byte, or a run of hex digit pairs
+    for (int i = 4; i < CLI_COMMAND_MAX_ARGS && argv[i]; i++) {
+      for (const char* h = argv[i]; h[0] && n < 62; h += (h[1] ? 2 : 1)) {
+        char b[3] = {h[0], h[1], 0};
+        f[n++] = strtol(b, nullptr, 16);
+      }
+    }
+    f[1] = n - 1;
+    uint8_t crc = 0;
+    for (int i = 2; i < n; i++) {
+      crc ^= f[i];
+      for (int k = 0; k < 8; k++) crc = (crc & 0x80) ? (crc << 1) ^ 0xD5 : crc << 1;
+    }
+    f[n++] = crc;
+    cliSerialPrint(radioHostInject(f, n) ? "sent %d bytes" : "no image running", n);
+    return 0;
+  }
+  if (argv[1] && !strcmp(argv[1], "sdlog")) {
+    static char t[6144] __attribute__((section(".ram")));
+    uint32_t n = xfHostCopySdTrace(t, sizeof(t));
+    for (uint32_t i = 0; i < n; i++) {
+      if (t[i] == 10) cliSerialPutc(13);
+      cliSerialPutc(t[i]);
+      if ((i & 63) == 63) sleep_ms(10);
+    }
+    cliSerialPrint("end");
+    return 0;
+  }
+  if (argv[1] && !strcmp(argv[1], "cap")) {
+    // one line per captured frame: hex bytes
+    static uint8_t b[1024];
+    uint32_t n = radioHostCopyCapture(b, sizeof(b));
+    for (uint32_t i = 0; i + 2 <= n;) {
+      uint32_t len = b[i + 1] + 2;
+      if (i + len > n) break;
+      for (uint32_t j = 0; j < len; j++) {
+        static const char hx[] = "0123456789abcdef";
+        cliSerialPutc(hx[b[i + j] >> 4]);
+        cliSerialPutc(hx[b[i + j] & 15]);
+      }
+      cliSerialPutc(13);
+      cliSerialPutc(10);
+      sleep_ms(5);
+      i += len;
+    }
+    cliSerialPrint("end");
+    return 0;
+  }
+  if (argv[1] && argv[1][0]) {
+    uint8_t sub;
+    if (!strcmp(argv[1], "elrs")) sub = TANGO2_RF_ELRS;
+    else if (!strcmp(argv[1], "xf")) sub = TANGO2_RF_CROSSFIRE;
+    else {
+      cliSerialPrint("usage: rf [elrs|xf]");
+      return -1;
+    }
+    g_model.moduleData[INTERNAL_MODULE].subType = sub;
+    storageDirty(EE_MODEL);
+    cliSerialPrint("model internal RF -> %s", sub ? "Crossfire" : "ELRS");
+    return 0;
+  }
+  const char* v = elrsHostVersion();
+  cliSerialPrint("active: %s (%s)", radioHostImageName(radioHostActive()),
+                 radioHostStatus());
+  cliSerialPrint("elrs: %s, image %s", elrsHostStatus(), v ? v : "-");
+  cliSerialPrint("crossfire: %s", xfHostStatus());
+  static char log[1024];
+  uint32_t n = radioHostCopyLog(log, sizeof(log));
+  for (uint32_t i = 0; i < n; i++) {
+    if (log[i] == 10) cliSerialPutc(13);
+    cliSerialPutc(log[i]);
+    if ((i & 63) == 63) sleep_ms(10);  // the CLI TX fifo drops what the host hasn't read yet
+  }
+  return 0;
+}
+
+// Binary-safe file dump for the PC (tools/sd_dump.py): "size <n>", hex lines
+// of 32 bytes, then "crc32 <x>" (zlib CRC-32 of the whole file).
+int cliDump(const char ** argv)
+{
+  FIL file;
+  if (f_open(&file, argv[1], FA_OPEN_EXISTING | FA_READ) != FR_OK) {
+    cliSerialPrint("%s: File not found \"%s\"", argv[0], argv[1]);
+    return 0;
+  }
+  cliSerialPrint("size %lu", (unsigned long)f_size(&file));
+  static const char hex[] = "0123456789abcdef";
+  uint8_t buf[32];
+  UINT read;
+  uint32_t crc = 0xFFFFFFFF;
+  while (f_read(&file, buf, sizeof(buf), &read) == FR_OK && read > 0) {
+    for (UINT i = 0; i < read; i++) {
+      crc ^= buf[i];
+      for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & -(crc & 1));
+      cliSerialPutc(hex[buf[i] >> 4]);
+      cliSerialPutc(hex[buf[i] & 15]);
+    }
+    cliSerialCrlf();
+    sleep_ms(2);  // the CLI TX fifo drops what the host hasn't read yet
+  }
+  f_close(&file);
+  cliSerialPrint("crc32 %08lx", (unsigned long)(crc ^ 0xFFFFFFFF));
+  return 0;
+}
+
+// Print a text file from the SD card (no USB mass storage on this radio's
+// workflow, and "read" is only a speed test)
+int cliCat(const char ** argv)
+{
+  FIL file;
+  if (f_open(&file, argv[1], FA_OPEN_EXISTING | FA_READ) != FR_OK) {
+    cliSerialPrint("%s: File not found \"%s\"", argv[0], argv[1]);
+    return 0;
+  }
+  char buf[64];
+  UINT read;
+  while (f_read(&file, buf, sizeof(buf), &read) == FR_OK && read > 0) {
+    for (UINT i = 0; i < read; i++) {
+      if (buf[i] == '\n') cliSerialPutc('\r');
+      cliSerialPutc(buf[i]);
+    }
+    sleep_ms(10);  // the CLI TX fifo drops what the host hasn't read yet
+  }
+  f_close(&file);
+  cliSerialCrlf();
+  return 0;
+}
+
+// Reboot into the resident loader at 0x0800C000 (RTC BKP19R = "MON1")
+int cliLoader(const char ** argv)
+{
+  cliSerialPrint("OK, rebooting into the loader");
+  sleep_ms(50);  // let the reply leave over USB
+#if !defined(SIMU)
+  boardRebootToLoader();
+#endif
+  return 0;
+}
+
+#if defined(TANGO2_MLX_GIMBALS)
+int cliGimbal(const char ** argv)
+{
+  // gimbal reg <n> <value>: rewrite an MLX90393 register on both sensors
+  if (argv[1] && !strcmp(argv[1], "reg") && argv[2] && argv[3]) {
+    unsigned reg = strtoul(argv[2], nullptr, 0), val = strtoul(argv[3], nullptr, 0);
+    bool ok = mlxSetReg(reg, val);
+    cliSerialPrint("reg %u = 0x%04x: %s", reg, val, ok ? "ok" : "readback/burst FAILED");
+    return 0;
+  }
+  uint32_t c0 = mlxReadCount[0], c1 = mlxReadCount[1];
+  sleep_ms(1000);
+  cliSerialPrint("rate g0 %lu/s g1 %lu/s", (unsigned long)(mlxReadCount[0] - c0), (unsigned long)(mlxReadCount[1] - c1));
+  for (int s = 0; s < 2; s++) {
+    const MlxSample& m = mlxSamples[s];
+    cliSerialPrint("g%d st=%02x T=%u X=%d Y=%d Z=%d age=%ums err=%u", s, m.status, m.t,
+                   m.x, m.y, m.z, (unsigned)(time_get_ms() - m.stamp), m.errors);
+  }
+  cliSerialPrint("ok=%d", mlxGimbalOk());
+  return 0;
+}
+#endif
+#endif
+
 const MemArea memAreas[] = {
   { "RCC", RCC, sizeof(RCC_TypeDef) },
   { "GPIOA", GPIOA, sizeof(GPIO_TypeDef) },
@@ -2339,6 +2530,15 @@ const CliCommand cliCommands[] = {
   { "rec", cliRecord, "<filename> [<seconds>]" },
 #endif
   { "reboot", cliReboot, "[wdt]" },
+#if defined(RADIO_TANGO2)
+  { "loader", cliLoader, "" },
+  { "cat", cliCat, "<filename>" },
+  { "dump", cliDump, "<filename>" },
+  { "rf", cliRf, "[elrs|xf] | send <dest> <type> [bytes|hex..] | cap | sdlog" },
+#if defined(TANGO2_MLX_GIMBALS)
+  { "gimbal", cliGimbal, "[reg <n> <value>]" },
+#endif
+#endif
   { "set", cliSet, "<what> <value>" },
 #if defined(ENABLE_SERIAL_PASSTHROUGH)
   { "serialpassthrough", cliSerialPassthrough, "<port type> [<port number>] [<baudrate>] [sport|ppm] [hangup]"},

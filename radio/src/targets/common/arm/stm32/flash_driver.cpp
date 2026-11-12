@@ -200,12 +200,25 @@ static uint32_t stm32_flash_get_bank(uint32_t address)
 #endif
 }
 
+#if defined(RADIO_TANGO2)
+// TBS bootloader (0x08000000), resident loader (0x0800C000) and EdgeTX
+// itself (0x08020000) must never be erased or written from EdgeTX: only the
+// ELRS image slot (0x080C0000-0x080FFFFF) may be. See targets/tango2/board.h.
+static inline bool flash_write_allowed(uint32_t address)
+{
+  return address >= 0x080C0000u && address < 0x08100000u;
+}
+#else
+static inline bool flash_write_allowed(uint32_t) { return true; }
+#endif
+
 static inline void stm32_flash_unlock() { HAL_FLASH_Unlock(); }
 static inline void stm32_flash_lock() { HAL_FLASH_Lock(); }
 
 static int stm32_flash_erase_sector(uint32_t address)
 {
   int ret = 0;
+  if (!flash_write_allowed(address)) return -1;
 
 #if defined(STM32F2) || defined(STM32F4)
 
@@ -285,6 +298,7 @@ static int stm32_flash_erase_sector(uint32_t address)
 static int stm32_flash_program(uint32_t address, void* data, uint32_t len)
 {
   int ret = 0;
+  if (!flash_write_allowed(address)) return -1;
 
 #if defined(STM32F2) || defined(STM32F4)
 
@@ -373,6 +387,7 @@ void lockFlash() { stm32_flash_lock(); }
 
 bool flashWrite(uint32_t* address, const uint32_t* buffer)
 {
+  if (!flash_write_allowed((uintptr_t)address)) return false;
   // check first if the address is on a sector boundary
   uint32_t sector = stm32_flash_get_sector((uintptr_t)address);
   uint32_t bank = stm32_flash_get_bank((uintptr_t)address);

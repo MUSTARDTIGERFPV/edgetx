@@ -93,7 +93,13 @@
 #define USBD_HID_INTERFACE_FS_STRING        "HID Interface"
 
 #define USBD_CDC_VID                        USBD_VID_STM
+#if defined(RADIO_TANGO2)
+// 0483:5740 is the resident loader's port on this radio; the app (EdgeTX)
+// enumerates as 0483:5741, so the PC tools can tell them apart
+#define USBD_CDC_PID                        0x5741
+#else
 #define USBD_CDC_PID                        0x5740     // do not change, this ID is used by the ST USB driver for Windows
+#endif
 #define USBD_CDC_PRODUCT_FS_STRING          USB_NAME " Serial Port"
 #define USBD_CDC_CONFIGURATION_FS_STRING    "VSP Config"
 #define USBD_CDC_INTERFACE_FS_STRING        "VSP Interface"
@@ -296,6 +302,7 @@ uint8_t * USBD_FS_DeviceDescriptor(USBD_SpeedTypeDef speed, uint16_t *length)
   UNUSED(speed);
 
   int vid, pid;
+  uint8_t devClass = 0x00;  // per interface
 
   /* version has to be bcd coded */
   uint8_t version_minor = ((VERSION_MINOR / 10) << 4) | (VERSION_MINOR % 10);
@@ -310,6 +317,11 @@ uint8_t * USBD_FS_DeviceDescriptor(USBD_SpeedTypeDef speed, uint16_t *length)
     case USB_SERIAL_MODE:
       vid = USBD_CDC_VID;
       pid = USBD_CDC_PID;
+#if defined(RADIO_TANGO2)
+      // No vendor driver claims 0483:5741 by ID, so with class 0 Windows
+      // splits the CDC interfaces (usbccgp) and the port fails with code 10.
+      devClass = 0x02;
+#endif
       break;
 
     case USB_MASS_STORAGE_MODE:
@@ -337,7 +349,7 @@ uint8_t * USBD_FS_DeviceDescriptor(USBD_SpeedTypeDef speed, uint16_t *length)
       USB_DESC_TYPE_DEVICE,       /*bDescriptorType*/
       0x00,                       /*bcdUSB USB specification release number in binary-coded decimal*/
       0x02,
-      0x00,                       /*bDeviceClass*/
+      devClass,                   /*bDeviceClass*/
       0x00,                       /*bDeviceSubClass*/
       0x00,                       /*bDeviceProtocol*/
       USB_MAX_EP0_SIZE,           /*bMaxPacketSize*/
