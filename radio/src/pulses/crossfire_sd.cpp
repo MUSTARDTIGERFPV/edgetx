@@ -103,10 +103,10 @@ void crsfSdProcessFrame(uint8_t module, const uint8_t* frame, uint8_t len)
     case CRSF_SD_REJECT:
       if (module == _module &&
           (_state == SD_OFFERED || _state == SD_OFFER_DUE)) {
-        // [reason][text...]
+        // [reason][text...][crc]: the text is what's between frame[8] and the crc
         uint8_t n = 0;
-        if (len > 10) {
-          n = min<uint8_t>(len - 10, sizeof(_rejectText) - 1);
+        if (len > 9) {
+          n = min<uint8_t>(len - 9, sizeof(_rejectText) - 1);
           memcpy(_rejectText, &frame[8], n);
         }
         _rejectText[n] = '\0';
