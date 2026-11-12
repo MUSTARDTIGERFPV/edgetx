@@ -27,6 +27,7 @@
 
 #include "edgetx.h"
 #include "lua/lua_states.h"
+#include "pulses/crossfire_sd.h"
 
 #if defined(COLORLCD)
 #include "view_main.h"
@@ -636,6 +637,11 @@ void perMain()
 #endif
     return;
   }
+
+#if defined(CROSSFIRE)
+  // blocks the UI task for the length of an accepted session
+  crsfSdCheck();
+#endif
 
 #if defined(MULTIMODULE)
   checkFailsafeMulti();
