@@ -50,6 +50,23 @@ static volatile uint32_t _alarmQuietUntil = 0;
 static volatile bool _portOwned[NUM_MODULES] = {};
 static char _rejectText[33];
 
+// A request we can't serve right now gets a REJECT with the reason, in the next
+// slot an offer would have used. Separate from _state: that stays SD_IDLE.
+static volatile bool _refuseDue = false;
+static volatile uint8_t _refuseModule = 0;
+static volatile uint8_t _refuseKind = 0;
+static volatile uint8_t _refuseReason = 0;
+static const char* volatile _refuseText = "";
+
+static void _refuse(uint8_t module, uint8_t kind, uint8_t reason, const char* text)
+{
+  _refuseModule = module;
+  _refuseKind = kind;
+  _refuseReason = reason;
+  _refuseText = text;
+  _refuseDue = true;
+}
+
 bool crsfSdStartOffer(uint8_t module, uint8_t kind)
 {
   if (_state != SD_IDLE || module >= NUM_MODULES) return false;
@@ -79,12 +96,21 @@ void crsfSdProcessFrame(uint8_t module, const uint8_t* frame, uint8_t len)
     case CRSF_SD_REQUEST:
       // The module asking is the user asking: no prompt. Only refuse what
       // would be unsafe or impossible right now.
+      // The module retries its request every 100 ms, so each one gets its own
+      // refusal; the text is what the module shows after "Radio: "
       if (_armed(module)) {
         TRACE("[SD] request refused: armed");
+        _refuse(module, kind, 1, "armed");
         return;
       }
       if (usbPlugged() && getSelectedUsbMode() == USB_MASS_STORAGE_MODE) {
         TRACE("[SD] request refused: USB storage");
+        _refuse(module, kind, 2, "USB storage is on");
+        return;
+      }
+      if (!sdMounted()) {
+        TRACE("[SD] request refused: no card");
+        _refuse(module, kind, 3, "no SD card");
         return;
       }
       if (crsfSdStartOffer(module, kind)) {
@@ -119,6 +145,27 @@ void crsfSdProcessFrame(uint8_t module, const uint8_t* frame, uint8_t len)
 
 uint8_t crsfSdSetupOffer(uint8_t module, uint8_t* frame)
 {
+  if (_refuseDue && module == _refuseModule) {
+    // [REJECT][kind][reason][text]
+    const char* text = _refuseText;
+    const uint8_t n = min<size_t>(strlen(text), 32);
+    uint8_t* buf = frame;
+    *buf++ = UART_SYNC;
+    *buf++ = 7 + n;  // type .. crc
+    *buf++ = CRSF_SD_SESSION_ID;
+    *buf++ = MODULE_ADDRESS;
+    *buf++ = RADIO_ADDRESS;
+    *buf++ = CRSF_SD_REJECT;
+    *buf++ = _refuseKind;
+    *buf++ = _refuseReason;
+    memcpy(buf, text, n);
+    buf += n;
+    *buf = crc8(frame + 2, buf - frame - 2);
+    buf++;
+    _refuseDue = false;
+    return buf - frame;
+  }
+
   if (module != _module) return 0;
 
   uint32_t now = time_get_ms();
